@@ -58,7 +58,7 @@ def rzd_async_request(structure_id, layer_id, use_json=False, **kwargs):
 def choose_station(stations):
     click.echo(u'Пожалуйста, уточнитет станцию.')
     for i, s in enumerate(stations):
-        click.echo(u'{0}. {1} ({2})'.format(i + 1, s[1], s[0]))
+        click.echo(u'{0}. {1} ({2})'.format(i + 1, s['station'], s['code']))
     choice = click.prompt(u'Номер нужной станции', default=1)
     return stations[choice - 1]
 
@@ -74,8 +74,8 @@ def retrieve_station_code(name):
         }
     )
 
-    stations = [(s['c'], s['n'],) for s in resp.json()]
-    stations = filter(lambda s: s[1].startswith(name.upper()), stations)
+    stations = [dict(code=s['c'], station=s['n']) for s in resp.json()]
+    stations = filter(lambda s: s['station'].startswith(name.upper()), stations)
 
     result_station = choose_station(stations[0:5])
     return result_station[0]
@@ -97,10 +97,10 @@ def get_train_route(train, departure, full=True):
     )
     stops = []
     for stop in route.xpath('./Routes/Stop'):
-        stops.append((
-            stop.attrib['Code'],
-            stop.attrib['Station'],
-        ))
+        stops.append({
+            'code': stop.attrib['Code'],
+            'station': stop.attrib['Station'],
+        })
 
     return stops
 
@@ -108,8 +108,12 @@ def get_train_route(train, departure, full=True):
 @click.command()
 @click.argument('train')
 def processor(train):
-    for code, station in get_train_route(train, arrow.now()):
-        click.echo(u'{1} {0}'.format(code, station))
+    for stop in get_train_route(train, arrow.now()):
+        click.echo(
+            u'{1} {0}'.format(
+                stop['code'],
+                stop['station'],
+            ))
 
 if __name__ == '__main__':
     processor()
