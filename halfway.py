@@ -97,9 +97,12 @@ def get_train_route(train, departure, full=True):
     )
     stops = []
     for stop in route.xpath('./Routes/Stop'):
+        wt_node = stop.find('./WaitingTime')
+
         stops.append({
             'code': stop.attrib['Code'],
             'station': stop.attrib['Station'],
+            'waiting_time': wt_node is not None and int(wt_node.text) or 0,
         })
 
     return stops
