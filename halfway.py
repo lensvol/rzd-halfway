@@ -7,6 +7,10 @@ import time
 from lxml import etree as ET
 
 
+class RZDException(Exception):
+    pass
+
+
 human_readable_names = {
     u'Москва': 2000000,
     u'Петрозаводск': 2004300,
@@ -22,37 +26,51 @@ human_readable_names = {
 
 
 def rzd_async_request(structure_id, layer_id, use_json=False, **kwargs):
+    rid = None
+    session_id = None
     params = {
         'STRUCTURE_ID': structure_id,
         'layer_id': layer_id,
     }
     params.update(kwargs)
-    rid = None
 
     s = requests.Session()
     resp = s.get(
         'http://pass.rzd.ru/timetable/public/ru',
         params=params,
     )
+
     if not use_json:
         xml = ET.fromstring(resp.content)
         rid = xml.find('rid').text
+    else:
+        json_resp = resp.json()
+        if json_resp['result'] == 'Error':
+            raise RZDException(json_resp['message'])
+        rid = json_resp['rid']
+        session_id = json_resp.get('SESSION_ID')
+
+    result_params = dict(params)
+    result_params['rid'] = rid
+    if session_id:
+        result_params['SESSION_ID'] = session_id
 
     time.sleep(3)
-    result_params = {
-        'STRUCTURE_ID': structure_id,
-        'layer_id': layer_id,
-        'rid': int(rid),
-    }
     resp = s.get(
         'http://pass.rzd.ru/timetable/public/ru',
         params=result_params,
     )
-
     if not use_json:
-        return ET.fromstring(resp.content)
+        xml_resp = ET.fromstring(resp.content)
+        error_node = xml_resp.find('./Error')
+        if error_node is not None:
+            raise RZDException(error_node.text)
+        return xml_resp
     else:
-        return resp.json()
+        json_resp = resp.json()
+        if json_resp['result'] == 'Error':
+            raise RZDException(json_resp['message'])
+        return json_resp
 
 
 def choose_station(stations):
@@ -76,15 +94,13 @@ def retrieve_station_code(name):
 
     stations = [dict(code=s['c'], station=s['n']) for s in resp.json()]
     stations = filter(lambda s: s['station'].startswith(name.upper()), stations)
-
     result_station = choose_station(stations[0:5])
-    return result_station[0]
+    return result_station['code']
 
 
 def get_station_code(name):
     if name in human_readable_names:
         return human_readable_names[name]
-
     return retrieve_station_code(name)
 
 
@@ -108,6 +124,37 @@ def get_train_route(train, departure, full=True):
     return stops
 
 
+def get_trip_variants(from_station, to_station, departure=None):
+    if departure is None:
+        departure = arrow.now()
+
+    from_code = get_station_code(from_station)
+    to_code = get_station_code(to_station)
+
+    variants = {}
+    raw_variants = rzd_async_request(
+        735,
+        5371,
+        use_json=True,
+        dir=0,
+        tfl=3,
+        checkSeats=1,
+        st0=from_station.upper(),
+        code0=from_code,
+        dt0=departure.format('DD.MM.YYYY'),
+        st1=to_station.upper(),
+        code1=to_code,
+        dt1=departure.replace(days=1).format('DD.MM.YYYY'),
+    )
+    trains = raw_variants['tp'][0]['list']
+
+    for train in trains:
+        variants[train['number']] = {
+            car['typeLoc']: (car['freeSeats'], car['tariff']) for car in train['cars']
+        }
+    return variants
+
+
 @click.command()
 @click.argument('train')
 def processor(train):
@@ -118,5 +165,10 @@ def processor(train):
                 stop['station'],
             ))
 
+
 if __name__ == '__main__':
-    processor()
+    try:
+        processor()
+    except RZDException as e:
+        click.secho(u'Ошибка: ', nl=False, fg='red')
+        click.echo(e.message)
