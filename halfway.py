@@ -12,16 +12,16 @@ class RZDException(Exception):
 
 
 human_readable_names = {
-    u'Москва': 2000000,
-    u'Петрозаводск': 2004300,
-    u'Тверь': 2004600,
-    u'Нижний Новгород': 2060001,
-    u'Вологда': 2010030,
-    u'Казань': 2060500,
-    u'Санкт-Петербург': 2004000,
-    u'Ярославль': 2010000,
-    u'Минск': 2100000,
-    u'Киев': 2200000,
+    u'Москва': ('МОСКВА', 2000000),
+    u'Петрозаводск': ('ПЕТРОЗАВОДСК-ПАСС', 2004300),
+    u'Тверь': ('ТВЕРЬ', 2004600),
+    u'Нижний Новгород': ('НИЖНИЙ НОВГОРОД МОСКОВ', 2060001),
+    u'Вологда': ('ВОЛОГДА 1', 2010030),
+    u'Казань': ('КАЗАНЬ ПАСС', 2060500),
+    u'Санкт-Петербург': ('САНКТ-ПЕТЕРБУРГ', 2004000),
+    u'Ярославль': ('ЯРОСЛАВЛЬ-ГОРОД', 2010000),
+    u'Минск': ('МИНСК', 2100000),
+    u'Киев': ('КИЕВ', 2200000),
 }
 
 
@@ -81,7 +81,7 @@ def choose_station(stations):
     return stations[choice - 1]
 
 
-def retrieve_station_code(name):
+def retrieve_station(name):
     resp = requests.get(
         'http://pass.rzd.ru/suggester',
         params={
@@ -95,13 +95,14 @@ def retrieve_station_code(name):
     stations = [dict(code=s['c'], station=s['n']) for s in resp.json()]
     stations = filter(lambda s: s['station'].startswith(name.upper()), stations)
     result_station = choose_station(stations[0:5])
-    return result_station['code']
+    return result_station
 
 
-def get_station_code(name):
+def get_station(name):
     if name in human_readable_names:
-        return human_readable_names[name]
-    return retrieve_station_code(name)
+        station, code = human_readable_names[name]
+        return dict(station=station, code=code)
+    return retrieve_station(name)
 
 
 def get_train_route(train, departure, full=True):
@@ -128,8 +129,8 @@ def get_trip_variants(from_station, to_station, departure=None):
     if departure is None:
         departure = arrow.now()
 
-    from_code = get_station_code(from_station)
-    to_code = get_station_code(to_station)
+    from_code = get_station(from_station)['code']
+    to_code = get_station(to_station)['code']
 
     variants = {}
     raw_variants = rzd_async_request(
@@ -158,12 +159,14 @@ def get_trip_variants(from_station, to_station, departure=None):
 @click.command()
 @click.argument('train')
 def processor(train):
+    stations = []
     for stop in get_train_route(train, arrow.now()):
         click.echo(
             u'{1} {0}'.format(
                 stop['code'],
                 stop['station'],
             ))
+        stations.append(stop['station'])
 
 
 if __name__ == '__main__':
