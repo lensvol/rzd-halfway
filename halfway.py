@@ -179,11 +179,25 @@ def processor(train):
         stations.append(stop['station'])
 
     click.echo()
-
-    trip_variants = get_trip_variants(stations[0], stations[-1])
+    click.secho(u'Маршрут: ', fg='green')
+    click.secho(u'{0} - {1}', stations[0], stations[-1])
+    trip_variants = get_trip_variants(start, stop)
     table = [(car, seats, price) for car, (seats, price) in trip_variants[train].items()]
     print tabulate(table, headers=[u'Класс', u'Места', u'Стоимость'])
 
+    for intermediate in stations[1:-1]:
+        click.echo()
+        click.secho(u'Маршрут: ', fg='green')
+        click.secho(u'{0} - {1} - {2}', start, intermediate, stop)
+
+        table = []
+        first_half = get_trip_variants(start, intermediate)
+        second_half = get_trip_variants(intermediate, stop)
+        for car, (before_seats, before_price) in first_half[train].items():
+            if car in second_half[train]:
+                after_seats, after_price = second_half[train][car]
+            table.append((car, before_price + after_price))
+        print tabulate(table, headers=[u'Класс', u'Стоимость'])
 
 if __name__ == '__main__':
     for station, code in popular_stations.values():
