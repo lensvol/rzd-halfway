@@ -3,6 +3,7 @@
 import arrow
 import click
 import requests
+from tabulate import tabulate
 import time
 from lxml import etree as ET
 
@@ -11,17 +12,17 @@ class RZDException(Exception):
     pass
 
 
-human_readable_names = {
-    u'Москва': ('МОСКВА', 2000000),
-    u'Петрозаводск': ('ПЕТРОЗАВОДСК-ПАСС', 2004300),
-    u'Тверь': ('ТВЕРЬ', 2004600),
-    u'Нижний Новгород': ('НИЖНИЙ НОВГОРОД МОСКОВ', 2060001),
-    u'Вологда': ('ВОЛОГДА 1', 2010030),
-    u'Казань': ('КАЗАНЬ ПАСС', 2060500),
-    u'Санкт-Петербург': ('САНКТ-ПЕТЕРБУРГ', 2004000),
-    u'Ярославль': ('ЯРОСЛАВЛЬ-ГОРОД', 2010000),
-    u'Минск': ('МИНСК', 2100000),
-    u'Киев': ('КИЕВ', 2200000),
+popular_stations = {
+    u'Москва': (u'МОСКВА', 2000000),
+    u'Петрозаводск': (u'ПЕТРОЗАВОДСК-ПАСС', 2004300),
+    u'Тверь': (u'ТВЕРЬ', 2004600),
+    u'Нижний Новгород': (u'НИЖНИЙ НОВГОРОД МОСКОВ', 2060001),
+    u'Вологда': (u'ВОЛОГДА 1', 2010030),
+    u'Казань': (u'КАЗАНЬ ПАС', 2060500),
+    u'Санкт-Петербург': (u'САНКТ-ПЕТЕРБУРГ', 2004000),
+    u'Ярославль': (u'ЯРОСЛАВЛЬ-ГОРОД', 2010000),
+    u'Минск': (u'МИНСК', 2100000),
+    u'Киев': (u'КИЕВ', 2200000),
 }
 
 
@@ -74,7 +75,7 @@ def rzd_async_request(structure_id, layer_id, use_json=False, **kwargs):
 
 
 def choose_station(stations):
-    click.echo(u'Пожалуйста, уточнитет станцию.')
+    click.echo(u'Пожалуйста, уточните станцию:')
     for i, s in enumerate(stations):
         click.echo(u'{0}. {1} ({2})'.format(i + 1, s['station'], s['code']))
     choice = click.prompt(u'Номер нужной станции', default=1)
@@ -94,13 +95,18 @@ def retrieve_station(name):
 
     stations = [dict(code=s['c'], station=s['n']) for s in resp.json()]
     stations = filter(lambda s: s['station'].startswith(name.upper()), stations)
-    result_station = choose_station(stations[0:5])
+
+    if len(stations) > 1:
+        result_station = choose_station(stations[0:5])
+    else:
+        result_station = stations[0]
+
     return result_station
 
 
 def get_station(name):
-    if name in human_readable_names:
-        station, code = human_readable_names[name]
+    if name in popular_stations:
+        station, code = popular_stations[name]
         return dict(station=station, code=code)
     return retrieve_station(name)
 
@@ -160,16 +166,29 @@ def get_trip_variants(from_station, to_station, departure=None):
 @click.argument('train')
 def processor(train):
     stations = []
+
+    click.secho(u'Маршрут поезда: ', fg='cyan', nl=False)
+    click.echo(train)
+
     for stop in get_train_route(train, arrow.now()):
         click.echo(
-            u'{1} {0}'.format(
+            u'{1} ({0})'.format(
                 stop['code'],
                 stop['station'],
             ))
         stations.append(stop['station'])
 
+    click.echo()
+
+    trip_variants = get_trip_variants(stations[0], stations[-1])
+    table = [(car, seats, price) for car, (seats, price) in trip_variants[train].items()]
+    print tabulate(table, headers=[u'Класс', u'Места', u'Стоимость'])
+
 
 if __name__ == '__main__':
+    for station, code in popular_stations.values():
+        popular_stations[station] = (station, code)
+
     try:
         processor()
     except RZDException as e:
