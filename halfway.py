@@ -48,8 +48,12 @@ def rzd_async_request(structure_id, layer_id, use_json=False, **kwargs):
         json_resp = resp.json()
         if json_resp['result'] == 'Error':
             raise RZDException(json_resp['message'])
-        rid = json_resp['rid']
+
+        rid = json_resp.get('rid')
         session_id = json_resp.get('SESSION_ID')
+
+        if not rid:
+            return json_resp
 
     result_params = dict(params)
     result_params['rid'] = rid
@@ -89,17 +93,20 @@ def retrieve_station(name):
             'stationNamePart': name.upper(),
             'lang': 'ru',
             'compactMode': 'y',
-            'lat': 3, # TODO: прояснить значение параметра
+            'lat': 3,  # TODO: прояснить значение параметра
         }
     )
 
     stations = [dict(code=s['c'], station=s['n']) for s in resp.json()]
     stations = filter(lambda s: s['station'].startswith(name.upper()), stations)
 
+    result_station = None
     if len(stations) > 1:
         result_station = choose_station(stations[0:5])
-    else:
+    elif len(stations) == 1:
         result_station = stations[0]
+    else:
+        raise RZDException(u'Неизвестная станция: {}'.format(name))
 
     return result_station
 
@@ -135,8 +142,8 @@ def get_trip_variants(from_station, to_station, departure=None):
     if departure is None:
         departure = arrow.now()
 
-    from_code = get_station(from_station)['code']
-    to_code = get_station(to_station)['code']
+    # from_code = get_station(from_station)['code']
+    # to_code = get_station(to_station)['code']
 
     variants = {}
     raw_variants = rzd_async_request(
@@ -146,11 +153,11 @@ def get_trip_variants(from_station, to_station, departure=None):
         dir=0,
         tfl=3,
         checkSeats=1,
-        st0=from_station.upper(),
-        code0=from_code,
+        st0=from_station,
+        code0=from_station,
         dt0=departure.format('DD.MM.YYYY'),
-        st1=to_station.upper(),
-        code1=to_code,
+        st1=to_station,
+        code1=to_station,
         dt1=departure.replace(days=1).format('DD.MM.YYYY'),
     )
     trains = raw_variants['tp'][0]['list']
@@ -176,26 +183,33 @@ def processor(train):
                 stop['code'],
                 stop['station'],
             ))
-        stations.append(stop['station'])
+        stations.append(stop)
 
+
+    start = stations[0]
+    stop = stations[-1]
     click.echo()
     click.secho(u'Маршрут: ', fg='green')
-    click.secho(u'{0} - {1}', stations[0], stations[-1])
-    trip_variants = get_trip_variants(start, stop)
-    table = [(car, seats, price) for car, (seats, price) in trip_variants[train].items()]
+    click.secho(u'{0} - {1}'.format(start['station'], stop['station']))
+    trip_variants = get_trip_variants(start['code'], stop['code'])
+    table = [(car, seats, price) for car, (seats, price) in trip_variants.get(train, {}).items()]
     print tabulate(table, headers=[u'Класс', u'Места', u'Стоимость'])
 
     for intermediate in stations[1:-1]:
-        click.echo()
-        click.secho(u'Маршрут: ', fg='green')
-        click.secho(u'{0} - {1} - {2}', start, intermediate, stop)
+        first_half = get_trip_variants(start['code'], intermediate['code'])
+        if train not in first_half:
+            continue
 
-        table = []
-        first_half = get_trip_variants(start, intermediate)
-        second_half = get_trip_variants(intermediate, stop)
+        second_half = get_trip_variants(intermediate['code'], stop['code'])
+        if train not in second_half:
+            continue
+
+        print u'{0} - {1} - {2}'.format(start['station'], intermediate['station'], stop['station'])
+
         for car, (before_seats, before_price) in first_half[train].items():
-            if car in second_half[train]:
-                after_seats, after_price = second_half[train][car]
+            if car not in second_half[train]:
+                continue
+            after_seats, after_price = second_half[train][car]
             table.append((car, before_price + after_price))
         print tabulate(table, headers=[u'Класс', u'Стоимость'])
 
